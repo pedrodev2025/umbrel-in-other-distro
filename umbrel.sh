@@ -173,5 +173,5 @@ else
 fi
 echo
 
-echo "--- Script finalizado com sucesso ---"
+echo " Script finalizado com sucesso "
 exit 0
