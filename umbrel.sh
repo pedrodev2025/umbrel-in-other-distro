@@ -157,7 +157,7 @@ if docker pull umbrel; then
     echo "INFO: Imagem umbrel baixada com sucesso."
 else
     echo "ERRO: Falha ao baixar a imagem umbrel
-    echo "Verifique sua conexão com a internet e a configuração do Docker ex: DNS, proxy."
+    echo "Verifique sua conexão com a internet e a configuração do Docker"
     exit 1
 fi
 echo
