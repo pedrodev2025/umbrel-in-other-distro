@@ -1,13 +1,13 @@
 #!/bin/bash
 
-
 # Sair imediatamente se um comando sair com status diferente de zero.
 set -e
 # Tratar erros em pipelines (e.g., cmd1 | cmd2) como falha se qualquer comando falhar.
 set -o pipefail
 
 # --- Variáveis ---
-IMAGE_NAME="umbrel"
+IMAGE_NAME="dockurr/umbrel" # Nome correto e completo da imagem
+CONTAINER_NAME="umbrel"
 
 # --- Funções ---
 
@@ -23,15 +23,9 @@ check_docker_installed() {
 # Instala Docker usando DNF (para Fedora, CentOS Stream, RHEL)
 install_docker_dnf() {
     echo "INFO: Instalando Docker Engine com DNF..."
-    # Adicionar repositório oficial do Docker
     dnf install -y dnf-plugins-core
-    # Usando o repositório do Fedora como padrão. Para CentOS/RHEL, o link pode precisar ser ajustado.
-    # Ex: https://download.docker.com/linux/centos/docker-ce.repo
     dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-    
-    # Instalar Docker Engine, CLI, Containerd e plugins
     dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    
     echo "INFO: Iniciando e habilitando o serviço Docker..."
     systemctl start docker
     systemctl enable docker
@@ -42,7 +36,6 @@ install_docker_dnf() {
 install_docker_pacman() {
     echo "INFO: Instalando Docker com Pacman..."
     pacman -Syu --noconfirm --needed docker docker-compose
-    
     echo "INFO: Iniciando e habilitando o serviço Docker..."
     systemctl start docker
     systemctl enable docker
@@ -52,35 +45,25 @@ install_docker_pacman() {
 # Instala Docker usando APT (para Debian, Ubuntu)
 install_docker_apt() {
     echo "INFO: Instalando Docker Engine com APT..."
-    # Desinstalar versões antigas, se existirem (ignorar erros se não existirem)
     for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do apt-get remove -y $pkg 2>/dev/null || true; done
-
-    # Configurar o repositório do Docker
     apt-get update -y
     apt-get install -y ca-certificates curl gnupg
-    
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL "https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
-    
     echo \
       "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
       $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-      
-    # Instalar Docker Engine
     apt-get update -y
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    
     echo "INFO: Iniciando e habilitando o serviço Docker..."
-    # O serviço Docker geralmente inicia automaticamente após a instalação em sistemas baseados em Debian/Ubuntu.
-    # Mas vamos garantir que esteja iniciado e habilitado.
     systemctl start docker
     systemctl enable docker
     echo "INFO: Docker instalado e configurado com APT."
 }
 
 # --- Script Principal ---
-echo "--- Iniciando script de automação do Docker ---"
+echo "--- Iniciando script de automação do Docker para Umbrel ---"
 echo
 
 # 1. Verificar privilégios de root
@@ -99,7 +82,6 @@ if check_docker_installed; then
     echo "INFO: Docker já está instalado no sistema."
 else
     echo "INFO: Docker não encontrado. Tentando instalar..."
-    
     if command -v dnf &> /dev/null; then
         echo "INFO: Detectado gerenciador de pacotes DNF (Fedora/RHEL/CentOS)."
         install_docker_dnf
@@ -111,12 +93,11 @@ else
         install_docker_apt
     else
         echo "AVISO: Nenhum gerenciador de pacotes suportado (dnf, pacman, apt) foi detectado."
-        echo "Por favor, instale o Docker manualmente para o seu sistema operacional."
+        echo "Por favor, instale o Docker manually para o seu sistema operacional."
         echo "Instruções podem ser encontradas em: https://docs.docker.com/engine/install/"
         exit 1
     fi
 
-    # Verifica novamente se a instalação foi bem-sucedida
     if ! check_docker_installed; then
         echo "ERRO: Falha crítica ao instalar o Docker. Verifique os logs acima."
         echo "Considere tentar a instalação manual seguindo a documentação oficial."
@@ -152,26 +133,58 @@ fi
 echo
 
 # 4. Baixar a imagem Docker especificada
-echo "PASSO 4: Baixando a imagem Docker umbrel"
-if docker pull umbrel; then
-    echo "INFO: Imagem umbrel baixada com sucesso."
+echo "PASSO 4: Baixando a imagem Docker '$IMAGE_NAME'..."
+if docker pull "$IMAGE_NAME"; then
+    echo "INFO: Imagem '$IMAGE_NAME' baixada com sucesso."
 else
-    echo "ERRO: Falha ao baixar a imagem umbrel
-    echo "Verifique sua conexão com a internet e a configuração do Docker"
+    echo "ERRO: Falha ao baixar a imagem '$IMAGE_NAME'."
+    echo "Verifique sua conexão com a internet e a configuração do Docker."
     exit 1
 fi
 echo
 
-# 5. Rodar o container Docker
-echo "PASSO 5: Rodando o container umbrel..."
-if docker run -it --rm --name umbrel --pid=host -p 80:80 -v "${PWD:-.}/umbrel:/data" -v "/var/run/docker.sock:/var/run/docker.sock" --stop-timeout 60 dockurr/umbrel ; then
-    echo
-    echo "INFO: Container '$IMAGE_NAME' executado com sucesso!"
+# 5. Parar e remover container existente com o mesmo nome (opcional, mas recomendado para evitar conflitos)
+echo "PASSO 5: Verificando e preparando para rodar o container '$CONTAINER_NAME'..."
+if [ "$(docker ps -q -f name=^/${CONTAINER_NAME}$)" ]; then
+    echo "INFO: Container '$CONTAINER_NAME' existente está rodando. Parando..."
+    docker stop "$CONTAINER_NAME"
+fi
+if [ "$(docker ps -aq -f name=^/${CONTAINER_NAME}$)" ]; then
+    echo "INFO: Removendo container '$CONTAINER_NAME' existente..."
+    docker rm "$CONTAINER_NAME"
+fi
+
+# 6. Rodar o container Docker
+echo "INFO: Rodando o container '$CONTAINER_NAME' com a imagem '$IMAGE_NAME'..."
+# Para rodar em background (recomendado para Umbrel):
+docker run -d \
+    --name "$CONTAINER_NAME" \
+    --pid=host \
+    -p 80:80 \
+    -v "${PWD}/umbrel:/data" \
+    -v "/var/run/docker.sock:/var/run/docker.sock" \
+    --stop-timeout 60 \
+    "$IMAGE_NAME"
+
+# Se preferir interativo (o script vai parar aqui até você fechar o container):
+# docker run -it --rm \
+#     --name "$CONTAINER_NAME" \
+#     --pid=host \
+#     -p 80:80 \
+#     -v "${PWD}/umbrel:/data" \
+#     -v "/var/run/docker.sock:/var/run/docker.sock" \
+#     --stop-timeout 60 \
+#     "$IMAGE_NAME"
+
+echo
+if [ "$(docker ps -q -f name=^/${CONTAINER_NAME}$)" ]; then
+    echo "INFO: Container '$CONTAINER_NAME' iniciado com sucesso e rodando em background."
+    echo "Acesse seu Umbrel em http://localhost (ou o IP da máquina)."
 else
-    echo "ERRO: Falha ao executar o container '$IMAGE_NAME'."
+    echo "ERRO: Falha ao iniciar o container '$CONTAINER_NAME'. Verifique os logs do Docker: docker logs $CONTAINER_NAME"
     exit 1
 fi
-echo
 
-echo " Script finalizado com sucesso "
+echo
+echo "--- Script finalizado ---"
 exit 0
